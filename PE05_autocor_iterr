@@ -1,0 +1,169 @@
+clc,clear variables
+
+% Specify channel impulse response
+h = [1 0.25 0.25];
+%h = 1
+
+N = 1e4;            %10k symbols to simulate
+Leq = 45;           %Length of equalizer filter
+
+% Calculate delay of equalizer
+LeqH = (Leq-1)/2;
+
+% Delay of the channel
+L = length(h);
+
+%-------------------------------------------------------------------------------------
+%Task 1. Generate QAM 16 signal
+%---------------------------------------------------------------------------------------
+% Specify QAM 16 constellation map as a vector column
+QAM16map = [-1-1i; -1-3i;-1+1i;-1+3i;
+            -3-1i; -3-3i; -3+1i; -3+3i;
+            +1-1i; +1-3i; +1+1i; +1+3i;
+            +3-1i; +3-3i; +3+1i; +3+3i];
+
+%Generate QAM16 symbols
+symDt = randi(16,1,N);
+
+% QAM 16 direct line of sight signal
+Ak = QAM16map(symDt).';
+
+% Read binary data(payload) from symbols
+binDt = (dec2bin(symDt-1) == '1')';
+binDt = binDt(:)';
+
+%-----------------------------------------------------------------------------------------
+% Task 2. Display plots of chanel's IR
+%---------------------------------------------------------------------------------------
+figure(1)
+subplot(2,1,1)
+stem(0:L-1,h,'r','linewidth',2);
+grid on; xlabel('Sample No');ylabel('Channel IR');
+
+%------------------------------------------------------------------------------------------
+% Task 2. Display plots of chanel's FR
+%------------------------------------------------------------------------------------------------
+M = 256;
+Hchan = freqz(h,1,M);       %Complex FR
+Hchan = abs(Hchan);           %Amplitude FR
+
+figure(1)
+subplot(2,1,2);
+plot((0:M-1)/M,Hchan,'r','linewidth',2);
+grid on; xlabel('Normalized Freq');ylabel('Channel AFR');
+
+%-------------------------------------------------------------------------------
+% Task 3.Transmit data and display QAM16 constellation
+%-------------------------------------------------------------------------------
+Rk = filter(h,1,Ak);      %Transmission in channel(equivalent filter)
+
+
+% Display the QAM16 constellation(without equalizer)
+figure(2)
+subplot(1,2,1)
+plot(real(Rk), imag(Rk),'b*', real(QAM16map),imag(QAM16map),'rx','linewidth',2);
+grid on; axis square; title('QAM16 constellation(No equalizer)')
+xlabel('Real part');ylabel('Imag part')
+
+%-------------------------------------------------------------------------------
+% Task 4. Detecting and counting of Ber errors
+% in advanced materials binRcv is denoted as Ak with a hat
+binRcv = QAM16demod(Rk,QAM16map);
+
+% Estimate BER as a number of mismatches between original and received(binary)
+Nerr1 = sum(binRcv ~= binDt)
+fprintf('Number of binary erros(no equalizer): %d out of %d\n',Nerr1,N*4);
+
+%-------------------------------------------------------------------------------
+% Task5. Equalizer calculation(autocorrelation method)
+%-------------------------------------------------------------------------------
+% Initialization
+
+hReEq = zeros(1,Leq);
+hImEq = zeros(1,Leq);
+
+% Separate Real and Imag parts
+RkRe = real(Rk);
+RkIm = imag(Rk);
+
+%Specify speed of convergence
+beta = 0.0005
+
+for i = LeqH + 1 : N - LeqH
+  %Cut the segment of Leq length data
+  rkRe = flipud(RkRe(i-LeqH:i+LeqH)');
+  rkIm = flipud(RkIm(i-LeqH:i+LeqH)');
+
+  %Find error of equalization
+  ReEk(i) = real(Ak(i))-hReEq*rkRe;
+  ImEk(i) = imag(Ak(i))-hImEq*rkIm;
+
+  %Update equalizer coefficient
+  hReEq = hReEq + beta*ReEk(i)*rkRe';
+  hImEq = hImEq + beta*ImEk(i)*rkIm';
+end
+
+##% Normalize autocorrelation matrices and cross-correlation vectors
+##RePhi = RePhi / (N-Leq+1);
+##ImPhi = ImPhi / (N-Leq+1);
+##ReAlpha = ReAlpha / (N-Leq+1);
+##ImAlpha = ImAlpha / (N-Leq+1);
+##
+##% Calculate equalizers for real/imag parts of the signal
+##hReEq = inv(RePhi) * ReAlpha;
+##hImEq = inv(ImPhi) * ImAlpha;
+
+% Plot the impulse responses for equalizer only
+figure(3)
+subplot(2,2,1), stem(0:Leq-1, hReEq,'r','linewidth',2);    %Impulse response real
+grid on; xlabel('Sample no');ylabel('Real Equalizer Ir');
+
+subplot(2,2,3), stem(0:Leq-1, hImEq,'r','linewidth',2);    %Impulse response imag
+grid on; xlabel('Sample no');ylabel('Imag Equalizer Ir');
+
+% Plot the AFR for equalizer only
+HReEq = freqz(hReEq,1,M); HReEq = abs(HReEq);
+HImEq = freqz(hImEq,1,M); HImEq = abs(HImEq);
+
+figure(3)
+subplot(2,2,2), plot((0:M-1)/M,HReEq,'r','linewidth',2);
+grid on;xlabel('Normalizes frequency');ylabel('Real equalizer');
+subplot(2,2,4), plot((0:M-1)/M,HImEq,'r','linewidth',2);
+grid on;xlabel('Normalizes frequency');ylabel('Im Equalizer');
+
+% The plots for entire system(Channel+Equalizer)
+% Impulse Response for the entire system
+hSyst = conv(h,hReEq);
+
+% Frequency response of the entire system
+HSyst = freqz(hSyst,1,M);HSyst=abs(HSyst);
+
+%PLot
+figure(4)
+subplot(2,1,1),stem(0:L+Leq-2,hSyst,'r','linewidth',2);grid on; xlabel('Sample no');ylabel('SYstem IR');
+subplot(2,1,2), plot((0:M-1)/M,HSyst,'r','linewidth',2);grid on; xlabel('Norm frq');ylabel('System AFR');
+ylim([0.6 1.6])
+
+
+%-------------------DEMODEULATION WITH EQUALIZATION-----------------------------------------------------------
+% Apply equalizers(Real and imaginary part)
+ReQk = filter(hReEq, 1, real(Rk));
+ImQk = filter(hImEq, 1, imag(Rk));
+Qk = ReQk + 1i*ImQk;
+
+% Apply delay of Leq/2 cause by equalizer
+Qk = Qk(LeqH+1:end);
+
+% Plot QAM16 constellation after equalizer
+figure(2)
+subplot(1,2,2)
+plot(real(Qk), imag(Qk),'b*', real(QAM16map),imag(QAM16map),'rx','linewidth',2)
+grid on; axis square; title('QAM16 constellation(With equalizer)')
+xlabel('Real part');ylabel('Imag part')
+
+% Demodulate symbols and count binary erros
+binRcvEq = QAM16demod(Qk,QAM16map);
+
+% EStimate number of binary errors
+Nerr2 = sum(binRcvEq ~= binDt(1:length(binRcvEq)));
+fprintf('Number of binary errors(w equalizers):%d out of %d',Nerr2,length(binRcvEq));
